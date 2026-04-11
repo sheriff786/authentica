@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
+import stat as stat_module
 import struct
 import re
 from dataclasses import dataclass, field
@@ -95,6 +97,12 @@ class MetadataResult:
     file_type: str
     mime_type: str
 
+    # File system timestamps (mirrors ExifTool's File group)
+    file_modification_date: Optional[str] = None
+    file_access_date: Optional[str] = None
+    file_creation_date: Optional[str] = None
+    file_permissions: Optional[str] = None
+
     # Tag groups (mirrors ExifTool's -g groupHeadings output)
     exif: dict[str, Any] = field(default_factory=dict)
     iptc: dict[str, Any] = field(default_factory=dict)
@@ -135,6 +143,10 @@ class MetadataResult:
             "FileSize": self.file_size,
             "FileType": self.file_type,
             "MIMEType": self.mime_type,
+            "FileModificationDate": self.file_modification_date,
+            "FileAccessDate": self.file_access_date,
+            "FileCreationDate": self.file_creation_date,
+            "FilePermissions": self.file_permissions,
             "MD5Sum": self.md5,
             "SHA256Sum": self.sha256,
             "Warnings": self.warnings,
@@ -208,6 +220,13 @@ class MetadataReader:
             file_type=path.suffix.lstrip(".").upper() or "UNKNOWN",
             mime_type=_guess_mime(data),
         )
+
+        # File system timestamps (mirrors ExifTool's File group)
+        result.file_modification_date = _format_stat_time(stat.st_mtime)
+        result.file_access_date = _format_stat_time(stat.st_atime)
+        # st_ctime is creation time on Windows, metadata change time on Unix
+        result.file_creation_date = _format_stat_time(stat.st_ctime)
+        result.file_permissions = _format_permissions(stat.st_mode)
 
         # Hashes (like exiftool's MD5Sum, SHA256Sum composite tags)
         if self.compute_hashes:
@@ -360,6 +379,13 @@ class MetadataReader:
 
     def _read_png(self, data: bytes, result: MetadataResult) -> None:
         """Read PNG text chunks for XMP, EXIF, metadata."""
+        _png_color_types = {
+            0: "Grayscale",
+            2: "RGB",
+            3: "Palette",
+            4: "Grayscale with Alpha",
+            6: "RGB with Alpha",
+        }
         pos = 8
         while pos < len(data) - 8:
             length = struct.unpack(">I", data[pos:pos+4])[0]
@@ -367,7 +393,22 @@ class MetadataReader:
             chunk_data = data[pos+8:pos+8+length]
             pos += 12 + length
 
-            if chunk_type == b"tEXt":
+            if chunk_type == b"IHDR" and len(chunk_data) == 13:
+                width, height = struct.unpack(">II", chunk_data[0:8])
+                bit_depth = chunk_data[8]
+                color_type = chunk_data[9]
+                compression = chunk_data[10]
+                filter_method = chunk_data[11]
+                interlace = chunk_data[12]
+                result.exif["ImageWidth"] = width
+                result.exif["ImageHeight"] = height
+                result.exif["BitDepth"] = bit_depth
+                result.exif["ColorType"] = _png_color_types.get(color_type, f"Unknown ({color_type})")
+                result.exif["Compression"] = "Deflate/Inflate" if compression == 0 else f"Unknown ({compression})"
+                result.exif["Filter"] = "Adaptive" if filter_method == 0 else f"Unknown ({filter_method})"
+                result.exif["Interlace"] = "Noninterlaced" if interlace == 0 else "Adam7 Interlace" if interlace == 1 else f"Unknown ({interlace})"
+
+            elif chunk_type == b"tEXt":
                 null_idx = chunk_data.find(b"\x00")
                 if null_idx != -1:
                     key = chunk_data[:null_idx].decode("latin-1")
@@ -405,14 +446,15 @@ class MetadataReader:
             elif chunk_type == b"IEND":
                 break
 
-        # Get dimensions from PIL
-        try:
-            img = Image.open(io.BytesIO(data))
-            result.exif["ImageWidth"] = img.width
-            result.exif["ImageHeight"] = img.height
-            result.exif["ColorSpace"] = img.mode
-        except Exception:
-            pass
+        # Get dimensions from PIL as fallback if IHDR wasn't found
+        if "ImageWidth" not in result.exif or "ImageHeight" not in result.exif:
+            try:
+                img = Image.open(io.BytesIO(data))
+                result.exif.setdefault("ImageWidth", img.width)
+                result.exif.setdefault("ImageHeight", img.height)
+                result.exif.setdefault("ColorSpace", img.mode)
+            except Exception:
+                pass
 
     # ── ID3 (MP3) ─────────────────────────────────────────────────────────────
 
@@ -835,6 +877,32 @@ def _clean_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return list(value)
     return value
+
+
+def _format_stat_time(timestamp: float) -> str:
+    """Format os.stat timestamp to ExifTool-style date string."""
+    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone()
+    offset = dt.strftime("%z")
+    # Format as "YYYY:MM:DD HH:MM:SS+HH:MM" to match ExifTool
+    formatted_offset = f"{offset[:3]}:{offset[3:]}" if len(offset) == 5 else offset
+    return dt.strftime("%Y:%m:%d %H:%M:%S") + formatted_offset
+
+
+def _format_permissions(mode: int) -> str:
+    """Format file mode to ExifTool-style permissions string like '-rw-rw-rw-'."""
+    parts = []
+    if stat_module.S_ISDIR(mode):
+        parts.append("d")
+    elif stat_module.S_ISLNK(mode):
+        parts.append("l")
+    else:
+        parts.append("-")
+    for who in ("USR", "GRP", "OTH"):
+        r = "r" if mode & getattr(stat_module, f"S_IR{who}") else "-"
+        w = "w" if mode & getattr(stat_module, f"S_IW{who}") else "-"
+        x = "x" if mode & getattr(stat_module, f"S_IX{who}") else "-"
+        parts.append(f"{r}{w}{x}")
+    return "".join(parts)
 
 
 def _guess_mime(data: bytes) -> str:

@@ -105,6 +105,8 @@ class C2PAResult:
     raw_manifest_bytes: Optional[bytes] = field(default=None, repr=False)
     manifest_store: Optional[dict] = field(default=None, repr=False)
     exiftool_tags: Optional[dict[str, str]] = field(default=None, repr=False)
+    data_hash_verified: Optional[bool] = None  # True/False/None if not checked
+    data_hash_details: Optional[dict] = field(default=None, repr=False)
     parse_warnings: list[str] = field(default_factory=list)
 
     @property
@@ -123,12 +125,15 @@ class C2PAResult:
             "signature_valid": self.signature_valid,
             "active_manifest_id": self.active_manifest_id,
             "claims": [c.to_dict() for c in self.claims],
+            "data_hash_verified": self.data_hash_verified,
             "warnings": self.parse_warnings,
         }
         if self.manifest_store:
             base["manifest_store"] = _safe_serialize(self.manifest_store)
         if self.exiftool_tags:
             base["exiftool_tags"] = self.exiftool_tags
+        if self.data_hash_details:
+            base["data_hash_details"] = _safe_serialize(self.data_hash_details)
         return base
 
 
@@ -178,6 +183,9 @@ class C2PAReader:
         # Decode the JUMBF / CBOR payload
         claims, active_id, sig_valid, store, tags = self._decode_manifest(manifest_bytes, warnings)
 
+        # Live SHA-256 data hash verification (Gap 4)
+        hash_verified, hash_details = _verify_data_hash(data, claims, warnings)
+
         return C2PAResult(
             manifest_found=True,
             signature_valid=sig_valid,
@@ -186,6 +194,8 @@ class C2PAReader:
             raw_manifest_bytes=manifest_bytes,
             manifest_store=store,
             exiftool_tags=tags,
+            data_hash_verified=hash_verified,
+            data_hash_details=hash_details,
             parse_warnings=warnings,
         )
 
@@ -429,7 +439,7 @@ class C2PAReader:
 
         assertions = self._extract_assertions(cbor_data, warnings, path_map)
         recorder = cbor_data.get("dc:title", cbor_data.get("recorder", "Unknown"))
-        gen = cbor_data.get("claim_generator", cbor_data.get("claimGenerator", "Unknown"))
+        gen = _extract_claim_generator(cbor_data)
         fmt = cbor_data.get("dc:format", cbor_data.get("format", "unknown"))
         sig_info = {
             "algorithm": cbor_data.get("alg", "unknown"),
@@ -534,7 +544,7 @@ class C2PAReader:
             return None
         assertions = self._extract_assertions(cbor_data, warnings, path_map)
         recorder = cbor_data.get("dc:title", cbor_data.get("recorder", "Unknown"))
-        gen = cbor_data.get("claim_generator", cbor_data.get("claimGenerator", "Unknown"))
+        gen = _extract_claim_generator(cbor_data)
         fmt = cbor_data.get("dc:format", cbor_data.get("format", "unknown"))
         sig_info = {
             "algorithm": cbor_data.get("alg", "unknown"),
@@ -673,6 +683,120 @@ def _iter_jumbf_boxes(data: bytes):
             yield from _iter_jumbf_boxes(box_data)
 
         pos += lbox
+
+
+def _extract_claim_generator(cbor_data: dict) -> str:
+    """
+    Extract claim generator name from C2PA claim CBOR map.
+
+    C2PA v2 spec uses 'claimGeneratorInfo' which is a list of objects,
+    each with a 'name' sub-field. Falls back to 'claim_generator' /
+    'claimGenerator' string keys for v1 compatibility.
+    """
+    # C2PA v2: claimGeneratorInfo is a list of dicts with 'name'
+    gen_info = cbor_data.get("claimGeneratorInfo") or cbor_data.get("claim_generator_info")
+    if isinstance(gen_info, list) and gen_info:
+        first = gen_info[0]
+        if isinstance(first, dict):
+            name = first.get("name")
+            if name:
+                return str(name)
+    elif isinstance(gen_info, dict):
+        name = gen_info.get("name")
+        if name:
+            return str(name)
+
+    # C2PA v1 fallback: plain string
+    gen = cbor_data.get("claim_generator") or cbor_data.get("claimGenerator")
+    if gen:
+        return str(gen)
+    return "Unknown"
+
+
+def _verify_data_hash(
+    file_data: bytes,
+    claims: list[C2PAClaim],
+    warnings: list[str],
+) -> tuple[Optional[bool], Optional[dict]]:
+    """
+    Verify the embedded C2PA data hash against the actual file bytes.
+
+    Reads the c2pa.hash.data assertion to find the expected hash,
+    algorithm, and exclusion ranges. Computes the hash over the file
+    bytes with the JUMBF exclusion ranges zeroed out, then compares.
+
+    Returns (verified: bool | None, details: dict | None).
+    """
+    hash_assertion = None
+    for claim in claims:
+        for assertion in claim.assertions:
+            if assertion.label == "c2pa.hash.data" and isinstance(assertion.raw, dict):
+                hash_assertion = assertion.raw
+                break
+        if hash_assertion:
+            break
+
+    if hash_assertion is None:
+        return None, None
+
+    expected_hash = hash_assertion.get("hash")
+    algorithm = hash_assertion.get("alg", "sha256")
+    exclusions = hash_assertion.get("exclusions", [])
+    name = hash_assertion.get("name", "jumbf manifest")
+    pad = hash_assertion.get("pad")
+
+    if not isinstance(expected_hash, (bytes, bytearray)):
+        warnings.append("c2pa.hash.data has no binary hash value")
+        return None, None
+
+    # Map algorithm name to hashlib
+    alg_map = {"sha256": "sha256", "sha384": "sha384", "sha512": "sha512"}
+    hash_name = alg_map.get(algorithm.lower().replace("-", ""))
+    if not hash_name:
+        warnings.append(f"Unsupported hash algorithm: {algorithm}")
+        return None, {"algorithm": algorithm, "supported": False}
+
+    # Build the byte stream with exclusion ranges replaced by zeroes
+    modified_data = bytearray(file_data)
+    exclusion_details = []
+    for ex in exclusions:
+        if not isinstance(ex, dict):
+            continue
+        start = ex.get("start", ex.get("offset", 0))
+        length = ex.get("length", 0)
+        if start is not None and length:
+            start = int(start)
+            length = int(length)
+            if 0 <= start < len(modified_data) and start + length <= len(modified_data):
+                modified_data[start:start + length] = b"\x00" * length
+                exclusion_details.append({"start": start, "length": length})
+
+    # Compute the hash
+    h = hashlib.new(hash_name)
+    h.update(bytes(modified_data))
+    computed_hash = h.digest()
+
+    verified = computed_hash == bytes(expected_hash)
+
+    details = {
+        "algorithm": algorithm,
+        "expected_hash": bytes(expected_hash).hex(),
+        "computed_hash": computed_hash.hex(),
+        "match": verified,
+        "exclusions": exclusion_details,
+        "name": name,
+    }
+
+    if not verified:
+        warnings.append(
+            f"assertion.dataHash MISMATCH: expected {bytes(expected_hash).hex()[:16]}... "
+            f"got {computed_hash.hex()[:16]}..."
+        )
+    else:
+        # Add to exiftool-style output
+        pass  # The match result is in the details
+
+    return verified, details
 
 
 def _has_cose_tag(data: bytes) -> bool:

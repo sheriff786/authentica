@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "AI content authenticity detection: C2PA metadata, passive watermarks, and image forensics with heatmap visualization"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "Mohammad Sheriff Mehmood", email = "mdsheriff2702@gmail.com" }]
 keywords = ["c2pa", "watermark", "ai-detection", "forensics", "content-authenticity", "provenance"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -55,10 +55,10 @@ docs = [
 authentica = "authentica.cli.main:cli"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/authentica"
-Documentation = "https://authentica.readthedocs.io"
-Repository = "https://github.com/yourusername/authentica"
-Issues = "https://github.com/yourusername/authentica/issues"
+Homepage = "https://github.com/sheriff786/authentica"
+Documentation = "https://github.com/sheriff786/authentica/blob/main/README.md"
+Repository = "https://github.com/sheriff786/authentica"
+Issues = "https://github.com/sheriff786/authentica/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/authentica"]
