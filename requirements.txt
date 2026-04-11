@@ -1,0 +1,10 @@
+Pillow>=10.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+matplotlib>=3.7.0
+cbor2>=5.4.0
+cryptography>=41.0.0
+rich>=13.0.0
+click>=8.1.0
+pywavelets>=1.4.0
+piexif>=1.1.0

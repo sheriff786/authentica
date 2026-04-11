@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "authentica"
+version = "0.2.0"
+description = "AI content authenticity detection: C2PA metadata, passive watermarks, and image forensics with heatmap visualization"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Your Name", email = "you@example.com" }]
+keywords = ["c2pa", "watermark", "ai-detection", "forensics", "content-authenticity", "provenance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Security",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "Pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "matplotlib>=3.7.0",
+    "cbor2>=5.4.0",
+    "cryptography>=41.0.0",
+    "rich>=13.0.0",
+    "click>=8.1.0",
+    "pywavelets>=1.4.0",
+    "piexif>=1.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.4.0",
+]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.4.0",
+    "mkdocstrings[python]>=0.23.0",
+]
+
+[project.scripts]
+authentica = "authentica.cli.main:cli"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/authentica"
+Documentation = "https://authentica.readthedocs.io"
+Repository = "https://github.com/yourusername/authentica"
+Issues = "https://github.com/yourusername/authentica/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/authentica"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=authentica --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src/authentica"]
