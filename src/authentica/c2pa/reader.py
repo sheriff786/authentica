@@ -721,24 +721,57 @@ def _verify_data_hash(
     """
     Verify the embedded C2PA data hash against the actual file bytes.
 
-    Reads the c2pa.hash.data assertion to find the expected hash,
-    algorithm, and exclusion ranges. Computes the hash over the file
-    bytes with the JUMBF exclusion ranges zeroed out, then compares.
+    Per the C2PA spec:
+    1. Read exclusion ranges from c2pa.hash.data assertion
+    2. Replace those byte ranges in the file with 0x00
+    3. If a 'pad' field exists, append those bytes after the file data
+    4. Compute hash and compare to the embedded expected hash
+
+    A file may have multiple claims (manifests). The ACTIVE (outermost)
+    manifest's hash should match the file on disk. We try all claims
+    and report the best match — typically the last claim whose exclusion
+    range covers the current C2PA chunk size.
 
     Returns (verified: bool | None, details: dict | None).
     """
-    hash_assertion = None
-    for claim in claims:
+    # Collect ALL hash assertions from all claims (last = active/outermost)
+    hash_candidates: list[tuple[dict, int]] = []
+    for idx, claim in enumerate(claims):
         for assertion in claim.assertions:
             if assertion.label == "c2pa.hash.data" and isinstance(assertion.raw, dict):
-                hash_assertion = assertion.raw
-                break
-        if hash_assertion:
-            break
+                hash_candidates.append((assertion.raw, idx))
 
-    if hash_assertion is None:
+    if not hash_candidates:
         return None, None
 
+    # Try each candidate — the active manifest (last/outermost) should match
+    best_result: tuple[Optional[bool], Optional[dict]] = (None, None)
+
+    for hash_assertion, claim_idx in reversed(hash_candidates):
+        result = _try_verify_single_hash(file_data, hash_assertion, claim_idx, warnings)
+        verified, details = result
+        if verified is True:
+            return True, details
+        # Keep the most recent attempt as fallback
+        if best_result[0] is None:
+            best_result = result
+
+    # None matched — return the active (last) manifest's result with diagnostic
+    if best_result[1] is not None and not best_result[0]:
+        best_result[1]["note"] = (
+            f"Tried {len(hash_candidates)} hash assertion(s) across "
+            f"{len(claims)} claim(s); none matched the current file bytes."
+        )
+    return best_result
+
+
+def _try_verify_single_hash(
+    file_data: bytes,
+    hash_assertion: dict,
+    claim_idx: int,
+    warnings: list[str],
+) -> tuple[Optional[bool], Optional[dict]]:
+    """Try to verify a single c2pa.hash.data assertion against file bytes."""
     expected_hash = hash_assertion.get("hash")
     algorithm = hash_assertion.get("alg", "sha256")
     exclusions = hash_assertion.get("exclusions", [])
@@ -746,32 +779,41 @@ def _verify_data_hash(
     pad = hash_assertion.get("pad")
 
     if not isinstance(expected_hash, (bytes, bytearray)):
-        warnings.append("c2pa.hash.data has no binary hash value")
         return None, None
 
-    # Map algorithm name to hashlib
-    alg_map = {"sha256": "sha256", "sha384": "sha384", "sha512": "sha512"}
-    hash_name = alg_map.get(algorithm.lower().replace("-", ""))
+    alg_map = {
+        "sha256": "sha256", "sha384": "sha384", "sha512": "sha512",
+        "sha-256": "sha256", "sha-384": "sha384", "sha-512": "sha512",
+    }
+    hash_name = alg_map.get(algorithm.lower())
     if not hash_name:
-        warnings.append(f"Unsupported hash algorithm: {algorithm}")
         return None, {"algorithm": algorithm, "supported": False}
 
-    # Build the byte stream with exclusion ranges replaced by zeroes
+    # Replace exclusion byte ranges with zeroes
     modified_data = bytearray(file_data)
     exclusion_details = []
     for ex in exclusions:
         if not isinstance(ex, dict):
             continue
-        start = ex.get("start", ex.get("offset", 0))
+        start = ex.get("start", ex.get("offset"))
         length = ex.get("length", 0)
         if start is not None and length:
             start = int(start)
             length = int(length)
-            if 0 <= start < len(modified_data) and start + length <= len(modified_data):
+            if 0 <= start and start + length <= len(modified_data):
                 modified_data[start:start + length] = b"\x00" * length
                 exclusion_details.append({"start": start, "length": length})
 
-    # Compute the hash
+    # Append pad bytes per C2PA spec
+    pad_len = 0
+    if isinstance(pad, (bytes, bytearray)) and len(pad) > 0:
+        modified_data.extend(pad)
+        pad_len = len(pad)
+    elif isinstance(pad, int) and pad > 0:
+        modified_data.extend(b"\x00" * pad)
+        pad_len = pad
+
+    # Compute hash
     h = hashlib.new(hash_name)
     h.update(bytes(modified_data))
     computed_hash = h.digest()
@@ -783,18 +825,20 @@ def _verify_data_hash(
         "expected_hash": bytes(expected_hash).hex(),
         "computed_hash": computed_hash.hex(),
         "match": verified,
+        "claim_index": claim_idx,
         "exclusions": exclusion_details,
+        "pad_bytes_appended": pad_len,
+        "file_size": len(file_data),
+        "hashed_size": len(modified_data),
         "name": name,
     }
 
     if not verified:
         warnings.append(
-            f"assertion.dataHash MISMATCH: expected {bytes(expected_hash).hex()[:16]}... "
+            f"assertion.dataHash claim[{claim_idx}] MISMATCH: "
+            f"expected {bytes(expected_hash).hex()[:16]}... "
             f"got {computed_hash.hex()[:16]}..."
         )
-    else:
-        # Add to exiftool-style output
-        pass  # The match result is in the details
 
     return verified, details
 

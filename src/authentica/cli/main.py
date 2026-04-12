@@ -63,11 +63,13 @@ def scan(file, as_json, heatmap, no_c2pa, no_watermark, no_forensics):
                        run_forensics=not no_forensics)
 
     if as_json:
-        click.echo(json.dumps(result.to_dict(), indent=2))
+        click.echo(json.dumps(result.to_dict(), indent=2, default=str))
         return
 
     _print_banner(file, result.file_type, result.scan_time_s)
     _print_trust_score(result.trust_score)
+    if result.metadata:
+        _print_metadata_summary(result.metadata)
     if result.c2pa:
         _print_c2pa(result.c2pa)
     if result.watermark:
@@ -347,6 +349,35 @@ def _print_banner(file: Path, file_type: str, elapsed: float) -> None:
         f"[bold]{file.name}[/]  ·  {file_type}  ·  {elapsed:.2f}s",
         title="[bold cyan]Authentica[/]", border_style="cyan",
     ))
+
+
+def _print_metadata_summary(meta) -> None:
+    """Print key file/image properties from MetadataReader."""
+    tbl = Table(box=rich_box.SIMPLE, show_header=False, pad_edge=False)
+    tbl.add_column("Tag", style="bold cyan", width=26)
+    tbl.add_column("Value")
+
+    # File timestamps
+    if meta.file_modification_date:
+        tbl.add_row("File Modification Date", meta.file_modification_date)
+    if meta.file_access_date:
+        tbl.add_row("File Access Date", meta.file_access_date)
+    if meta.file_creation_date:
+        tbl.add_row("File Creation Date", meta.file_creation_date)
+    if meta.file_permissions:
+        tbl.add_row("File Permissions", meta.file_permissions)
+
+    # Image dimensions + PNG IHDR fields
+    exif = meta.exif
+    for tag in ("ImageWidth", "ImageHeight", "BitDepth", "ColorType",
+                "Compression", "Filter", "Interlace"):
+        val = exif.get(tag)
+        if val is not None:
+            tbl.add_row(tag, str(val))
+
+    if tbl.row_count:
+        console.print("[bold]File & Image Properties[/]")
+        console.print(tbl)
 
 
 def _print_trust_score(score: float) -> None:

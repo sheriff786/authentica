@@ -13,6 +13,7 @@ from typing import Optional
 from authentica.c2pa.reader import C2PAReader, C2PAResult
 from authentica.watermark.detector import WatermarkDetector, WatermarkResult
 from authentica.forensics.analyzer import ForensicsAnalyzer, ForensicsResult
+from authentica.metadata.reader import MetadataReader, MetadataResult
 from authentica.utils.file_type import detect_file_type, FileType
 
 
@@ -37,6 +38,7 @@ class ScanResult:
     c2pa: Optional[C2PAResult] = None
     watermark: Optional[WatermarkResult] = None
     forensics: Optional[ForensicsResult] = None
+    metadata: Optional[MetadataResult] = None
     errors: dict[str, str] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ #
@@ -98,6 +100,7 @@ class ScanResult:
             "c2pa": self.c2pa.to_dict() if self.c2pa else None,
             "watermark": self.watermark.to_dict() if self.watermark else None,
             "forensics": self.forensics.to_dict() if self.forensics else None,
+            "metadata": self.metadata.to_dict() if self.metadata else None,
             "errors": self.errors,
         }
 
@@ -162,6 +165,13 @@ def scan(
         except Exception as exc:
             errors["forensics"] = str(exc)
 
+    # --- Metadata (EXIF/IPTC/XMP/IHDR/timestamps) ---
+    metadata_result: Optional[MetadataResult] = None
+    try:
+        metadata_result = MetadataReader(compute_hashes=False).read(path)
+    except Exception as exc:
+        errors["metadata"] = str(exc)
+
     elapsed = time.perf_counter() - t0
 
     return ScanResult(
@@ -171,5 +181,6 @@ def scan(
         c2pa=c2pa_result,
         watermark=wm_result,
         forensics=forensics_result,
+        metadata=metadata_result,
         errors=errors,
     )
