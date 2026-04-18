@@ -102,8 +102,9 @@ class ForensicsAnalyzer:
         result.save_ela_heatmap("ela.png")
     """
 
-    def analyze(self, path: Path) -> ForensicsResult:
+    def analyze(self, path: Path | str) -> ForensicsResult:
         """Run all forensics techniques and aggregate results."""
+        path = Path(path)
         img = Image.open(path).convert("RGB")
         arr = np.array(img, dtype=np.float64)
         gray = np.mean(arr, axis=2)

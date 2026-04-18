@@ -154,8 +154,9 @@ class C2PAReader:
                 print(assertion.label, assertion.description)
     """
 
-    def read(self, path: Path) -> C2PAResult:
+    def read(self, path: Path | str) -> C2PAResult:
         """Read and decode any C2PA manifest found in the file."""
+        path = Path(path)
         data = path.read_bytes()
         ext = path.suffix.lower()
 

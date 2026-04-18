@@ -31,7 +31,7 @@ from authentica.metadata.reader import MetadataReader
 from authentica.metadata.diff import diff_metadata
 from authentica.scanner.batch import BatchScanner
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 __author__ = "Authentica contributors"
 __license__ = "MIT"
 

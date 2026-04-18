@@ -119,8 +119,9 @@ class WatermarkDetector:
             result.save_heatmap("heatmap.png")
     """
 
-    def detect(self, path: Path) -> WatermarkResult:
+    def detect(self, path: Path | str) -> WatermarkResult:
         """Run all detection methods and aggregate results."""
+        path = Path(path)
         img = Image.open(path).convert("RGB")
         arr = np.array(img, dtype=np.float64)
         gray = np.mean(arr, axis=2)  # luminance channel
