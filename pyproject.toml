@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "authentica"
-version = "0.2.0"
+version = "0.2.1"
 description = "AI content authenticity detection: C2PA metadata, passive watermarks, and image forensics with heatmap visualization"
 readme = "README.md"
 license = { text = "MIT" }

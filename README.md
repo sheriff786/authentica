@@ -128,6 +128,71 @@ authentica/
     └── main.py               # Rich CLI (Click + Rich)
 ```
 
+### Data Flow
+
+```mermaid
+flowchart TD
+    A["User calls scan(path, options)"] --> B["Detect file type using magic bytes"]
+    B --> C{"File is image?"}
+    C -->|Yes| D["Run Watermark Detector"]
+    C -->|No| E["Skip Watermark"]
+    D --> F["Run Forensics Analyzer"]
+    E --> F
+    B --> G{"Run C2PA enabled?"}
+    G -->|Yes| H["Run C2PA Reader"]
+    G -->|No| I["Skip C2PA"]
+    H --> J["Aggregate Results"]
+    I --> J
+    F --> J
+    J --> K["Compute Trust Score"]
+    K --> L["Return ScanResult"]
+
+    %% Subprocesses
+    subgraph "Watermark Detection"
+        D1["DCT anomaly scan"]
+        D2["DWT energy analysis"]
+        D3["FFT spectrum peaks"]
+        D --> D1
+        D1 --> D2
+        D2 --> D3
+    end
+
+    subgraph "Forensics Analysis"
+        F1["Error Level Analysis"]
+        F2["Noise residual analysis"]
+        F3["Frequency domain anomaly"]
+        F --> F1
+        F1 --> F2
+        F2 --> F3
+    end
+
+    subgraph "C2PA Processing"
+        H1["Extract JUMBF boxes"]
+        H2["Parse CBOR payloads"]
+        H3["Decode claims/assertions"]
+        H4["Map to ExifTool tags"]
+        H --> H1
+        H1 --> H2
+        H2 --> H3
+        H3 --> H4
+    end
+
+    subgraph "Result Aggregation"
+        J1["Collect analyzer outputs"]
+        J2["Handle errors gracefully"]
+        J3["Create ScanResult object"]
+        J --> J1
+        J1 --> J2
+        J2 --> J3
+    end
+```
+
+The main flow follows this pattern:
+1. **File type detection** using magic bytes (never trusts extensions)
+2. **Conditional analyzer execution** based on file type and user options
+3. **Result aggregation** into a unified `ScanResult` with trust scoring
+4. **Error handling** that gracefully degrades when individual analyzers fail
+
 ### How it compares to ExifTool
 
 | ExifTool (Perl) | Authentica (Python) |

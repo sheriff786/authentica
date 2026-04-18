@@ -1,0 +1,58 @@
+```mermaid
+flowchart TD
+    A[Input file path] --> B[Magic-byte file type detection]
+    B --> C{File type valid?}
+    C -- Yes --> D[C2PAReader]
+    C -- Yes --> E[MetadataReader]
+    C -- Yes --> F[WatermarkDetector]
+    C -- Yes --> G[ForensicsAnalyzer]
+    C -- No --> H[Unsupported file warning]
+    D --> I[Parsed C2PA manifest + claims]
+    E --> J[EXIF/IPTC/XMP/GPS/ICC tags + hashes]
+    F --> K[Watermark confidence + heatmap]
+    G --> L[Forensics anomaly score + artifacts]
+    I --> M[ScanResult.c2pa]
+    J --> M[ScanResult.metadata]
+    K --> M[ScanResult.watermark]
+    L --> M[ScanResult.forensics]
+    M --> N[JSON output / CLI summary]
+    H --> N
+
+    subgraph "Watermark Detection"
+        D1[DCT anomaly scan]
+        D2[DWT energy analysis]
+        D3[FFT spectrum peaks]
+        D --> D1
+        D1 --> D2
+        D2 --> D3
+    end
+
+    subgraph "Forensics Analysis"
+        F1[Error Level Analysis]
+        F2[Noise residual analysis]
+        F3[Frequency domain anomaly]
+        F --> F1
+        F1 --> F2
+        F2 --> F3
+    end
+
+    subgraph "C2PA Processing"
+        H1[Extract JUMBF boxes]
+        H2[Parse CBOR payloads]
+        H3[Decode claims/assertions]
+        H4[Map to ExifTool tags]
+        H --> H1
+        H1 --> H2
+        H2 --> H3
+        H3 --> H4
+    end
+
+    subgraph "Result Aggregation"
+        J1[Collect analyzer outputs]
+        J2[Handle errors gracefully]
+        J3[Create ScanResult object]
+        J --> J1
+        J1 --> J2
+        J2 --> J3
+    end
+```

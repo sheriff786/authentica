@@ -259,6 +259,30 @@ Provides runnable examples for:
 
 ## 17) Data flow summary
 
+The following diagram shows the main `scan()` pipeline and how Authentica processes each file.
+
+```mermaid
+flowchart TD
+    A[Input file path] --> B[Magic-byte file type detection]
+    B --> C{File type valid?}
+    C -- Yes --> D[C2PAReader]
+    C -- Yes --> E[MetadataReader]
+    C -- Yes --> F[WatermarkDetector]
+    C -- Yes --> G[ForensicsAnalyzer]
+    C -- No --> H[Unsupported file warning]
+    D --> I[Parsed C2PA manifest + claims]
+    E --> J[EXIF/IPTC/XMP/GPS/ICC tags + hashes]
+    F --> K[Watermark confidence + heatmap]
+    G --> L[Forensics anomaly score + artifacts]
+    I --> M[ScanResult.c2pa]
+    J --> M[ScanResult.metadata]
+    K --> M[ScanResult.watermark]
+    L --> M[ScanResult.forensics]
+    M --> N[JSON output / CLI summary]
+    H --> N
+```
+
+
 File -> detect_file_type
   -> C2PAReader.read (optional)
   -> WatermarkDetector.detect (optional)
